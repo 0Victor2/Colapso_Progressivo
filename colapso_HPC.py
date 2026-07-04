@@ -247,7 +247,7 @@ def gera_estrutura(sol, id):
     asm.regenerate()
 
     # Job
-    job_name = 'Job_Portico2D'+repr(id)
+    job_name = 'Job_Portico2D_HPC_'+repr(id)
     if job_name in mdb.jobs.keys():
         del mdb.jobs[job_name]
 
@@ -256,25 +256,30 @@ def gera_estrutura(sol, id):
     job.waitForCompletion()
     
     # Visualização e plot do resultado em imagem
-    o3 = session.openOdb(name='C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D'+repr(id)+'.odb')
-    session.viewports['Viewport: 1'].setValues(displayedObject=o3)
-    a = mdb.models['Portico_2D_'+repr(id)].rootAssembly
-    session.viewports['Viewport: 1'].setValues(displayedObject=a)
-    session.viewports['Viewport: 1'].assemblyDisplay.setValues(optimizationTasks=OFF, geometricRestrictions=OFF, stopConditions=OFF)
-    o7 = session.odbs['C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D'+repr(id)+'.odb']
-    session.viewports['Viewport: 1'].setValues(displayedObject=o7)
-    session.viewports['Viewport: 1'].odbDisplay.basicOptions.setValues(renderBeamProfiles=ON)
-    session.viewports['Viewport: 1'].odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF, ))
-    session.viewports['Viewport: 1'].viewportAnnotationOptions.setValues(triad=OFF, title=OFF, state=OFF, annotations=OFF, compass=OFF, legend=ON)
-    session.viewports['Viewport: 1'].view.fitView()
-    session.viewports['Viewport: 1'].view.setValues(nearPlane=44.7674, 
-        farPlane=53.2767, width=29.6223, height=13.7368, viewOffsetX=-0.10578, 
-        viewOffsetY=0.27568)
-    session.viewports['Viewport: 1'].view.setValues(nearPlane=44.5265, 
-        farPlane=53.5176, width=29.4629, height=13.6629, viewOffsetX=-1.63575, 
-        viewOffsetY=0.248754)
-    session.printToFile(fileName='C:/Users/victo/Desktop/Metodos/imagens/Job_Portico_2D'+repr(id)+'.png', format=PNG, canvasObjects=(session.viewports['Viewport: 1'], ))
 
+    try: 
+
+        o3 = session.openOdb(name='C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb')
+        session.viewports['Viewport: 1'].setValues(displayedObject=o3)
+        a = mdb.models['Portico_2D_'+repr(id)].rootAssembly
+        session.viewports['Viewport: 1'].setValues(displayedObject=a)
+        session.viewports['Viewport: 1'].assemblyDisplay.setValues(optimizationTasks=OFF, geometricRestrictions=OFF, stopConditions=OFF)
+        o7 = session.odbs['C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb']
+        session.viewports['Viewport: 1'].setValues(displayedObject=o7)
+        session.viewports['Viewport: 1'].odbDisplay.basicOptions.setValues(renderBeamProfiles=ON)
+        session.viewports['Viewport: 1'].odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF, ))
+        session.viewports['Viewport: 1'].viewportAnnotationOptions.setValues(triad=OFF, title=OFF, state=OFF, annotations=OFF, compass=OFF, legend=ON)
+        session.viewports['Viewport: 1'].view.fitView()
+        session.viewports['Viewport: 1'].view.setValues(nearPlane=44.7674, 
+            farPlane=53.2767, width=29.6223, height=13.7368, viewOffsetX=-0.10578, 
+            viewOffsetY=0.27568)
+        session.viewports['Viewport: 1'].view.setValues(nearPlane=44.5265, 
+            farPlane=53.5176, width=29.4629, height=13.6629, viewOffsetX=-1.63575, 
+            viewOffsetY=0.248754)
+        session.printToFile(fileName='C:/Users/victo/Desktop/Metodos/imagens/Job_Portico2D_HPC_'+repr(id)+'.png', format=PNG, canvasObjects=(session.viewports['Viewport: 1'], ))
+
+    except Exception as e:
+                                print('Erro ao salvar Viewport') 
 
 
 # --------------------------------------------------------------------------
@@ -284,6 +289,9 @@ pavimentos = 3
 blocos = 2
 
 import random
+
+#Desativar quando não for mais teste!!!
+random.seed(42)
     
 num_pilares = (blocos+1)*pavimentos
 num_vigas = blocos*pavimentos
@@ -307,6 +315,7 @@ for i in range(N):
 # Execução do loop de simulações com remoção progressiva
 for i in range(num_pilares + 1):
 
+    #Gera e estrutura completa
     if i == num_pilares:
         gera_estrutura(sol, -1)
         break
