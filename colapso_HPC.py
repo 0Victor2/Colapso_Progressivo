@@ -18,6 +18,82 @@ from visualization import *
 from connectorBehavior import *
 import regionToolset
 
+from odbAccess import openOdb
+import numpy as np
+import random
+
+
+def get_tensao_max(id):
+
+    odb_path = 'C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb'
+
+    #Abrir Odb
+    odb = openOdb(path=odb_path)
+
+    #Pegar dados do ultimo step e frame
+    lastStep = odb.steps.values()[-1]
+    lastFrame = lastStep.frames[-1]
+
+    #Salvar Tensões
+    stress = lastFrame.fieldOutputs['S']
+
+    von_mises = stress.getScalarField(invariant=MISES)
+
+    values = von_mises.values
+    stress_data = np.array([v.data for v in values])
+
+    max_stress = np.max(stress_data)
+
+
+    print("Tensao Maxima: " +repr(max_stress))
+
+    odb.close()
+
+    return max_stress
+
+
+def get_desloc_max(id):
+
+    odb_path = 'C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb'
+
+    #Abrir Odb
+    odb = openOdb(path=odb_path)
+
+    #Pegar dados do ultimo step e frame
+    lastStep = odb.steps.values()[-1]
+    lastFrame = lastStep.frames[-1]
+
+    #Salvar Deslocamento Máximo
+    displacement = lastFrame.fieldOutputs['U']
+
+    max_desloc = -1
+
+    for value in displacement.values:
+        u1, u2 = value.data[0], value.data[1]
+
+        magnitude = np.sqrt(u1**2 + u2**2)
+        
+        if magnitude > max_desloc:
+            max_desloc = magnitude
+
+    print("\nDeslocamento Maximo: " +repr(max_desloc))
+
+    odb.close()
+
+    return max_desloc
+
+
+def run_job(id):
+     
+    #Job
+    job_name = 'Job_Portico2D_HPC_'+repr(id)
+    if job_name in mdb.jobs.keys():
+        del mdb.jobs[job_name]
+
+    job = mdb.Job(name=job_name, model='Portico_2D_'+repr(id), type=ANALYSIS, memory=90, memoryUnits=PERCENTAGE)
+    job.submit(consistencyChecking=OFF)
+    job.waitForCompletion()
+
 
 def gera_estrutura(sol, id):
 
@@ -246,40 +322,53 @@ def gera_estrutura(sol, id):
     part.generateMesh()
     asm.regenerate()
 
-    # Job
-    job_name = 'Job_Portico2D_HPC_'+repr(id)
-    if job_name in mdb.jobs.keys():
-        del mdb.jobs[job_name]
-
-    job = mdb.Job(name=job_name, model='Portico_2D_'+repr(id), type=ANALYSIS, memory=90, memoryUnits=PERCENTAGE)
-    job.submit(consistencyChecking=OFF)
-    job.waitForCompletion()
     
-    # Visualização e plot do resultado em imagem
 
-    try: 
+    
+    # # Visualização e plot do resultado em imagem
+    # try: 
 
-        o3 = session.openOdb(name='C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb')
-        session.viewports['Viewport: 1'].setValues(displayedObject=o3)
-        a = mdb.models['Portico_2D_'+repr(id)].rootAssembly
-        session.viewports['Viewport: 1'].setValues(displayedObject=a)
-        session.viewports['Viewport: 1'].assemblyDisplay.setValues(optimizationTasks=OFF, geometricRestrictions=OFF, stopConditions=OFF)
-        o7 = session.odbs['C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb']
-        session.viewports['Viewport: 1'].setValues(displayedObject=o7)
-        session.viewports['Viewport: 1'].odbDisplay.basicOptions.setValues(renderBeamProfiles=ON)
-        session.viewports['Viewport: 1'].odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF, ))
-        session.viewports['Viewport: 1'].viewportAnnotationOptions.setValues(triad=OFF, title=OFF, state=OFF, annotations=OFF, compass=OFF, legend=ON)
-        session.viewports['Viewport: 1'].view.fitView()
-        session.viewports['Viewport: 1'].view.setValues(nearPlane=44.7674, 
-            farPlane=53.2767, width=29.6223, height=13.7368, viewOffsetX=-0.10578, 
-            viewOffsetY=0.27568)
-        session.viewports['Viewport: 1'].view.setValues(nearPlane=44.5265, 
-            farPlane=53.5176, width=29.4629, height=13.6629, viewOffsetX=-1.63575, 
-            viewOffsetY=0.248754)
-        session.printToFile(fileName='C:/Users/victo/Desktop/Metodos/imagens/Job_Portico2D_HPC_'+repr(id)+'.png', format=PNG, canvasObjects=(session.viewports['Viewport: 1'], ))
+    #     o3 = session.openOdb(name=odb_path)
+    #     session.viewports['Viewport: 1'].setValues(displayedObject=o3)
+    #     a = mdb.models['Portico_2D_'+repr(id)].rootAssembly
+    #     session.viewports['Viewport: 1'].setValues(displayedObject=a)
+    #     session.viewports['Viewport: 1'].assemblyDisplay.setValues(optimizationTasks=OFF, geometricRestrictions=OFF, stopConditions=OFF)
+    #     o7 = session.odbs[odb_path]
+    #     session.viewports['Viewport: 1'].setValues(displayedObject=o7)
+    #     session.viewports['Viewport: 1'].odbDisplay.basicOptions.setValues(renderBeamProfiles=ON)
+    #     session.viewports['Viewport: 1'].odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF, ))
+    #     session.viewports['Viewport: 1'].viewportAnnotationOptions.setValues(triad=OFF, title=OFF, state=OFF, annotations=OFF, compass=OFF, legend=ON)
+    #     session.viewports['Viewport: 1'].view.fitView()
+    #     session.viewports['Viewport: 1'].view.setValues(nearPlane=44.7674, 
+    #         farPlane=53.2767, width=29.6223, height=13.7368, viewOffsetX=-0.10578, 
+    #         viewOffsetY=0.27568)
+    #     session.viewports['Viewport: 1'].view.setValues(nearPlane=44.5265, 
+    #         farPlane=53.5176, width=29.4629, height=13.6629, viewOffsetX=-1.63575, 
+    #         viewOffsetY=0.248754)
+    #     session.printToFile(fileName='C:/Users/victo/Desktop/Metodos/imagens/Job_Portico2D_HPC_'+repr(id)+'.png', format=PNG, canvasObjects=(session.viewports['Viewport: 1'], ))
 
-    except Exception as e:
-                                print('Erro ao salvar Viewport') 
+    # except Exception as e:
+    #                             print('Erro ao salvar Viewport') 
+
+
+def salva_info(path, sol, max_desloc, max_tensao):
+
+    f = open(path, 'a')
+
+
+    for i in range(len(sol)):
+        f.write(repr(sol[i])+'; ')
+    
+    f.write(repr(max_desloc)+'; ')
+    f.write(repr(max_tensao)+'; ')
+
+    if max_desloc < 0.5 and max_tensao < 3e8:
+        f.write("VIAVEL")
+    else:
+        f.write("INVIAVEL")
+
+    f.write('\n')
+    f.close()
 
 
 # --------------------------------------------------------------------------
@@ -288,7 +377,10 @@ def gera_estrutura(sol, id):
 pavimentos = 3
 blocos = 2
 
-import random
+path = "C:\\Users\\victo\\Desktop\\Metodos\\dados.txt"
+
+f = open(path, 'w')
+f.close()
 
 #Desativar quando não for mais teste!!!
 random.seed(42)
@@ -309,8 +401,8 @@ for i in range(N):
     sol[i] = random.randint(0, 1) # Define reforço (0 ou 1)
     
     # Sorteando floats para h e b uniformemente dentro do range
-    sol[i + N] = random.uniform(h_min, h_max)
-    sol[i + 2*N] = random.uniform(b_min, b_max)
+    sol[i + N] = round(random.uniform(h_min, h_max),2)
+    sol[i + 2*N] = round(random.uniform(b_min, b_max),2)
 
 # Execução do loop de simulações com remoção progressiva
 for i in range(num_pilares + 1):
@@ -322,5 +414,11 @@ for i in range(num_pilares + 1):
 
     sol_local = sol[:]
     sol_local[i] = -1
-    print(sol_local)
+
     gera_estrutura(sol_local, i)
+    run_job(i)
+    
+    salva_info(path, sol_local, get_desloc_max(i), get_tensao_max(i))
+
+
+gera_estrutura(sol, 102)
