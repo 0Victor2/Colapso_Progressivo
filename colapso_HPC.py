@@ -21,40 +21,42 @@ import regionToolset
 from odbAccess import openOdb
 import numpy as np
 import random
+import time
+
+L = 10.9728  
+H = 3.048    
+# def get_tensao_max(id):
+
+#     odb_path = 'Job_Portico2D_HPC_'+repr(id)+'.odb'
+
+#     #Abrir Odb
+#     odb = openOdb(path=odb_path)
+
+#     #Pegar dados do ultimo step e frame
+#     lastStep = odb.steps.values()[-1]
+#     lastFrame = lastStep.frames[-1]
+
+#     #Salvar Tensões
+#     stress = lastFrame.fieldOutputs['S']
+
+#     von_mises = stress.getScalarField(invariant=MISES)
+
+#     values = von_mises.values
+#     stress_data = np.array([v.data for v in values])
+
+#     max_stress = np.max(stress_data)
 
 
-def get_tensao_max(id):
+#     print("Tensao Maxima: " +repr(max_stress))
 
-    odb_path = 'C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb'
+#     odb.close()
 
-    #Abrir Odb
-    odb = openOdb(path=odb_path)
-
-    #Pegar dados do ultimo step e frame
-    lastStep = odb.steps.values()[-1]
-    lastFrame = lastStep.frames[-1]
-
-    #Salvar Tensões
-    stress = lastFrame.fieldOutputs['S']
-
-    von_mises = stress.getScalarField(invariant=MISES)
-
-    values = von_mises.values
-    stress_data = np.array([v.data for v in values])
-
-    max_stress = np.max(stress_data)
+#     return max_stress
 
 
-    print("Tensao Maxima: " +repr(max_stress))
+def get_desloc_max_x(id):
 
-    odb.close()
-
-    return max_stress
-
-
-def get_desloc_max(id):
-
-    odb_path = 'C:/Users/victo/Desktop/Metodos/temp/Job_Portico2D_HPC_'+repr(id)+'.odb'
+    odb_path = 'Job_Portico2D_HPC_'+repr(id)+'.odb'
 
     #Abrir Odb
     odb = openOdb(path=odb_path)
@@ -71,17 +73,17 @@ def get_desloc_max(id):
     for value in displacement.values:
         u1, u2 = value.data[0], value.data[1]
 
-        magnitude = np.sqrt(u1**2 + u2**2)
+        # magnitude = np.sqrt(u1**2 + u2**2)
         
-        if magnitude > max_desloc:
-            max_desloc = magnitude
+        # if magnitude > max_desloc:
+        #     max_desloc = magnitude
 
-    print("\nDeslocamento Maximo: " +repr(max_desloc))
+        if abs(u1) > max_desloc:
+            max_desloc = abs(u1)
 
     odb.close()
 
     return max_desloc
-
 
 def run_job(id):
      
@@ -94,15 +96,13 @@ def run_job(id):
     job.submit(consistencyChecking=OFF)
     job.waitForCompletion()
 
-
 def gera_estrutura(sol, id):
 
     mdb.Model(modelType=STANDARD_EXPLICIT, name='Portico_2D_'+repr(id))
     model = mdb.models['Portico_2D_'+repr(id)]
 
     # Parametros Geometricos (SI: metros)
-    L = 10.9728  
-    H = 3.048    
+
 
     # Geometria 
     s = model.ConstrainedSketch(name='__profile__', sheetSize=50.0)
@@ -314,6 +314,40 @@ def gera_estrutura(sol, id):
     region_vigas_load = regionToolset.Region(edges=beam_edges_inst)
     model.LineLoad(name='Carga_Gravitacional', createStepName='Step_Cargas', region=region_vigas_load, comp2=-40860.89)
 
+    # Cargas laterais: 5 kip, 5 kip e 2.5 kip
+    no_andar1 = inst.vertices.findAt(
+        ((0.0, H, 0.0),)
+    )
+
+    model.ConcentratedForce(
+        name='Carga_Lat_Andar1',
+        createStepName='Step_Cargas',
+        region=regionToolset.Region(vertices=no_andar1),
+        cf1=22240.0
+    )
+
+    no_andar2 = inst.vertices.findAt(
+        ((0.0, 2.0 * H, 0.0),)
+    )
+
+    model.ConcentratedForce(
+        name='Carga_Lat_Andar2',
+        createStepName='Step_Cargas',
+        region=regionToolset.Region(vertices=no_andar2),
+        cf1=22240.0
+    )
+
+    no_topo = inst.vertices.findAt(
+        ((0.0, 3.0 * H, 0.0),)
+    )
+
+    model.ConcentratedForce(
+        name='Carga_Lat_Topo',
+        createStepName='Step_Cargas',
+        region=regionToolset.Region(vertices=no_topo),
+        cf1=11120.0
+    )
+
     # Malha
     all_edges = part.edges[:]
     part.seedEdgeByNumber(edges=all_edges, number=10, constraint=FIXED)
@@ -345,13 +379,13 @@ def gera_estrutura(sol, id):
     #     session.viewports['Viewport: 1'].view.setValues(nearPlane=44.5265, 
     #         farPlane=53.5176, width=29.4629, height=13.6629, viewOffsetX=-1.63575, 
     #         viewOffsetY=0.248754)
-    #     session.printToFile(fileName='C:/Users/victo/Desktop/Metodos/imagens/Job_Portico2D_HPC_'+repr(id)+'.png', format=PNG, canvasObjects=(session.viewports['Viewport: 1'], ))
+    #     session.printToFile(fileName='/Job_Portico2D_HPC_'+repr(id)+'.png', format=PNG, canvasObjects=(session.viewports['Viewport: 1'], ))
 
     # except Exception as e:
     #                             print('Erro ao salvar Viewport') 
 
 
-def salva_info(path, sol, max_desloc, max_tensao):
+def salva_info(path, sol, max_desloc_x):
 
     f = open(path, 'a')
 
@@ -359,10 +393,9 @@ def salva_info(path, sol, max_desloc, max_tensao):
     for i in range(len(sol)):
         f.write(repr(sol[i])+'; ')
     
-    f.write(repr(max_desloc)+'; ')
-    f.write(repr(max_tensao)+'; ')
+    f.write(repr(max_desloc_x)+'; ')    
 
-    if max_desloc < 0.5 and max_tensao < 3e8:
+    if max_desloc_x < 0.03048:
         f.write("VIAVEL")
     else:
         f.write("INVIAVEL")
@@ -377,7 +410,7 @@ def salva_info(path, sol, max_desloc, max_tensao):
 pavimentos = 3
 blocos = 2
 
-path = "C:\\Users\\victo\\Desktop\\Metodos\\dados.txt"
+path = "dados.csv"
 
 f = open(path, 'w')
 f.close()
@@ -393,32 +426,229 @@ N = num_pilares + num_vigas
 sol = [0] * (3*N)   
 
 # Intervalos de variação para o Concreto (Ex: entre 30cm e 80cm)
-h_min, h_max = 0.30, 0.80
-b_min, b_max = 0.20, 0.50
+h_min, h_max = 0.01, 1.0
+b_min, b_max = 0.01, 1.0
+penalidade = 0.0
+
+def get_volume(sol):
+        
+        vol = 0
+        for i in range(N):
+            if i <= num_pilares:
+                vol +=  (sol[i+N] * sol[i+2*N]) * H
+            else: 
+                vol +=  (sol[i+N] * sol[i+2*N]) * L        
+
+        print("Volume:"+repr(vol))
+
+        return vol
+
+def gera_individuo():
+    individuo = [0] * (3*N)
+    
+    for i in range(N):
+        individuo[i] = random.randint(0, 1) # Define reforço (0 ou 1)
+        
+        # Sorteando floats para h e b uniformemente dentro do range
+        individuo[i + N] = round(random.uniform(h_min, h_max),2)
+        individuo[i + 2*N] = round(random.uniform(b_min, b_max),2)
+    
+    return individuo
+
+def avalia_individuo(sol, id):
+    try:
+        tempo_ind_inicio = time.time()
+
+        limite_desloc = 0.03048
+
+        pior_desloc = -1.0
+        pior_caso = None
+        penalidade_total = 0.0
+
+        # Avalia a estrutura original primeiro
+        run_id = id * 1000
+
+        gera_estrutura(sol, run_id)
+        run_job(run_id)
+
+        max_desloc_x = get_desloc_max_x(run_id)
+
+        if max_desloc_x > pior_desloc:
+            pior_desloc = max_desloc_x
+            pior_caso = "estrutura_completa"
+
+        if max_desloc_x > limite_desloc:
+            penalidade_total += 1e6 * (max_desloc_x - limite_desloc)
+
+        salva_info(path, sol, max_desloc_x)
+
+        # Remocao progressiva dos pilares
+        for i in range(num_pilares):
+
+            # Remove um pilar, mantendo os anteriores removidos
+            sol_removida = sol[:]
+
+            sol_removida[i] = -1
+
+            run_id = id * 1000 + i + 1
+
+            gera_estrutura(sol_removida, run_id)
+            run_job(run_id)
+
+            max_desloc_x = get_desloc_max_x(run_id)
+
+            if max_desloc_x > pior_desloc:
+                pior_desloc = max_desloc_x
+                pior_caso = "remocao_progressiva_ate_pilar_" + repr(i)
+
+            if max_desloc_x > limite_desloc:
+                penalidade_total += 1e6 * (max_desloc_x - limite_desloc)
+
+            salva_info(path, sol_removida, max_desloc_x)
+
+        volume = get_volume(sol)
+
+        if penalidade_total == 0.0:
+            viabilidade = "VIAVEL"
+        else:
+            viabilidade = "INVIAVEL"
+
+        fitness = volume + penalidade_total
+        tempo_ind = time.time() - tempo_ind_inicio
+
+        print("Individuo: " + repr(id))
+        print("Pior caso: " + repr(pior_caso))
+        print("Pior deslocamento maximo X: " + repr(pior_desloc))
+        print("Volume: " + repr(volume))
+        print("Viabilidade: " + viabilidade)
+        print("Penalidade total: " + repr(penalidade_total))
+        print("Fitness: " + repr(fitness))
+        print("Tempo individuo: %.2f s" % tempo_ind)
+
+        return fitness, viabilidade, pior_desloc, volume
+
+    except Exception as e:
+        print("Erro ao avaliar individuo " + repr(id) + ": " + repr(e))
+        return float('inf'), "ERRO", None, None
+
+def torneio(populacao, fitnesses, k=3):
+
+    melhor = None
+    melhor_fitness = float('inf')
+
+    for i in range(k):
+        idx = random.randint(0, len(populacao) - 1)
+        if melhor is None or fitnesses[idx] < melhor_fitness:
+            melhor = populacao[idx]
+            melhor_fitness = fitnesses[idx]
+    return melhor[:]        
+
+def cross_over(pai1, pai2):
+    ponto_corte = random.randint(1, len(pai1) - 2)
+    filho1 = pai1[:ponto_corte] + pai2[ponto_corte:]
+    filho2 = pai2[:ponto_corte] + pai1[ponto_corte:]
+    return filho1, filho2
+
+def mutacao(individuo, taxa_mutacao=0.01):
+
+    for i in range(3*N):
+        if random.random() < taxa_mutacao:
+            if i < N:  # Mutação para bits binários
+                individuo[i] = 1 - individuo[i]  # Inverte o bit
+            elif N <= i < 2*N:  # Mutação para h
+                individuo[i] = round(random.uniform(h_min, h_max), 2)
+            else:  # Mutação para b
+                individuo[i] = round(random.uniform(b_min, b_max), 2)
+    return individuo
 
 # Preenchendo o vetor solução de forma contínua
-for i in range(N):
-    sol[i] = random.randint(0, 1) # Define reforço (0 ou 1)
+#for i in range(N):
+#    sol[i] = random.randint(0, 1) # Define reforço (0 ou 1)
     
     # Sorteando floats para h e b uniformemente dentro do range
-    sol[i + N] = round(random.uniform(h_min, h_max),2)
-    sol[i + 2*N] = round(random.uniform(b_min, b_max),2)
+#    sol[i + N] = round(random.uniform(h_min, h_max),2)
+#    sol[i + 2*N] = round(random.uniform(b_min, b_max),2)
+
+
+tamanho_pop = 10
+num_geracoes = 20
+taxa_crossover = 0.8
+
+tempo_inicio = time.time()
+populacao = []
+melhor_global, melhor_fitness, melhor_desloc, melhor_volume = None, float('inf'), None, None
+
+for i in range(tamanho_pop):
+    individuo = gera_individuo()
+    populacao.append(individuo)
+
+for geracao in range(num_geracoes):
+    fitnesses = []
+
+    print("GERACAO " + repr(geracao))
+
+    for idx, individuo in enumerate(populacao):
+        run_id = geracao * tamanho_pop + idx
+        fitness, viabilidade, max_desloc_x, volume = avalia_individuo(individuo, run_id)
+        fitnesses.append(fitness)
+
+        if fitness < melhor_fitness:
+            melhor_fitness = fitness
+            melhor_global = individuo[:]
+            melhor_desloc = max_desloc_x
+            melhor_volume = volume
+
+    nova_populacao = []
+
+    while len(nova_populacao) < tamanho_pop:
+        pai1 = torneio(populacao, fitnesses)
+        pai2 = torneio(populacao, fitnesses)
+
+        if random.random() < taxa_crossover:
+            filho1, filho2 = cross_over(pai1, pai2)
+        else:
+            filho1, filho2 = pai1[:], pai2[:]
+
+        filho1 = mutacao(filho1)
+        filho2 = mutacao(filho2)
+
+        nova_populacao.append(filho1)
+
+        if len(nova_populacao) < tamanho_pop:
+            nova_populacao.append(filho2)
+
+    populacao = nova_populacao
+
+
+tempo_total = time.time() - tempo_inicio
+
+print("MELHOR SOLUCAO ENCONTRADA")
+print("Melhor fitness: " + repr(melhor_fitness))
+print("Melhor volume: " + repr(melhor_volume))
+print("Melhor deslocamento maximo X: " + repr(melhor_desloc))
+
+if melhor_desloc is not None and melhor_desloc < 0.03048:
+    print("Viabilidade final: VIAVEL")
+else:
+    print("Viabilidade final: INVIAVEL")
+
+print("Melhor individuo:")
+print(melhor_global)
+
+print("Tempo total de execucao: %.2f min" % (tempo_total / 60.0))
 
 # Execução do loop de simulações com remoção progressiva
-for i in range(num_pilares + 1):
+#for i in range(num_pilares + 1):
 
     #Gera e estrutura completa
-    if i == num_pilares:
-        gera_estrutura(sol, -1)
-        break
+#    if i == num_pilares:
+#        gera_estrutura(sol, -1)
+#        break
 
-    sol_local = sol[:]
-    sol_local[i] = -1
+#    sol_local = sol[:]
+#    sol_local[i] = -1
 
-    gera_estrutura(sol_local, i)
-    run_job(i)
+#    gera_estrutura(sol_local, i)
+#    run_job(i)
     
-    salva_info(path, sol_local, get_desloc_max(i), get_tensao_max(i))
-
-
-gera_estrutura(sol, 102)
+#    salva_info(path, sol_local, get_desloc_max_x(i))
