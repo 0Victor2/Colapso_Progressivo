@@ -23,35 +23,6 @@ import numpy as np
 import random
 import time
 
-L = 10.9728  
-H = 3.048    
-# def get_tensao_max(id):
-
-#     odb_path = 'Job_Portico2D_HPC_'+repr(id)+'.odb'
-
-#     #Abrir Odb
-#     odb = openOdb(path=odb_path)
-
-#     #Pegar dados do ultimo step e frame
-#     lastStep = odb.steps.values()[-1]
-#     lastFrame = lastStep.frames[-1]
-
-#     #Salvar Tensões
-#     stress = lastFrame.fieldOutputs['S']
-
-#     von_mises = stress.getScalarField(invariant=MISES)
-
-#     values = von_mises.values
-#     stress_data = np.array([v.data for v in values])
-
-#     max_stress = np.max(stress_data)
-
-
-#     print("Tensao Maxima: " +repr(max_stress))
-
-#     odb.close()
-
-#     return max_stress
 
 
 def get_desloc_max_x(id):
@@ -85,6 +56,7 @@ def get_desloc_max_x(id):
 
     return max_desloc
 
+
 def run_job(id):
      
     #Job
@@ -96,12 +68,12 @@ def run_job(id):
     job.submit(consistencyChecking=OFF)
     job.waitForCompletion()
 
+
 def gera_estrutura(sol, id):
 
     mdb.Model(modelType=STANDARD_EXPLICIT, name='Portico_2D_'+repr(id))
     model = mdb.models['Portico_2D_'+repr(id)]
 
-    # Parametros Geometricos (SI: metros)
 
 
     # Geometria 
@@ -174,8 +146,6 @@ def gera_estrutura(sol, id):
     model.materials['Concreto_HPC'].Elastic(table=((50E9, 0.2),))
 
     # Perfil Retangular Padrão Geométrico Base
-    h_padrao = 0.40
-    b_padrao = 0.30
     model.RectangularProfile(name='Perfil_Padrao', a=h_padrao, b=b_padrao)
 
     # --------------------------------------------------------------------------
@@ -356,34 +326,6 @@ def gera_estrutura(sol, id):
     part.generateMesh()
     asm.regenerate()
 
-    
-
-    
-    # # Visualização e plot do resultado em imagem
-    # try: 
-
-    #     o3 = session.openOdb(name=odb_path)
-    #     session.viewports['Viewport: 1'].setValues(displayedObject=o3)
-    #     a = mdb.models['Portico_2D_'+repr(id)].rootAssembly
-    #     session.viewports['Viewport: 1'].setValues(displayedObject=a)
-    #     session.viewports['Viewport: 1'].assemblyDisplay.setValues(optimizationTasks=OFF, geometricRestrictions=OFF, stopConditions=OFF)
-    #     o7 = session.odbs[odb_path]
-    #     session.viewports['Viewport: 1'].setValues(displayedObject=o7)
-    #     session.viewports['Viewport: 1'].odbDisplay.basicOptions.setValues(renderBeamProfiles=ON)
-    #     session.viewports['Viewport: 1'].odbDisplay.display.setValues(plotState=(CONTOURS_ON_DEF, ))
-    #     session.viewports['Viewport: 1'].viewportAnnotationOptions.setValues(triad=OFF, title=OFF, state=OFF, annotations=OFF, compass=OFF, legend=ON)
-    #     session.viewports['Viewport: 1'].view.fitView()
-    #     session.viewports['Viewport: 1'].view.setValues(nearPlane=44.7674, 
-    #         farPlane=53.2767, width=29.6223, height=13.7368, viewOffsetX=-0.10578, 
-    #         viewOffsetY=0.27568)
-    #     session.viewports['Viewport: 1'].view.setValues(nearPlane=44.5265, 
-    #         farPlane=53.5176, width=29.4629, height=13.6629, viewOffsetX=-1.63575, 
-    #         viewOffsetY=0.248754)
-    #     session.printToFile(fileName='/Job_Portico2D_HPC_'+repr(id)+'.png', format=PNG, canvasObjects=(session.viewports['Viewport: 1'], ))
-
-    # except Exception as e:
-    #                             print('Erro ao salvar Viewport') 
-
 
 def salva_info(path, sol, max_desloc_x):
 
@@ -404,44 +346,70 @@ def salva_info(path, sol, max_desloc_x):
     f.close()
 
 
+def get_volume(sol):
+        
+        #Calcular pelo vetor solução -> Vantagem: Podemos atribuir valores de materiais difenrentes.
+
+        volume = 0
+
+        for i in range(0,N):
+
+            if sol[i] == -1:
+                pass
+             
+            elif i < num_pilares:
+                if sol[i] == 1:
+                    volume += (sol[i+N] * sol[i+2*N]) * H
+                else:
+                    volume += (b_padrao * h_padrao) * H
+
+            else: 
+                if sol[i] == 1:
+                    volume +=  (sol[i+N] * sol[i+2*N]) * L
+                else:
+                    volume += (b_padrao * h_padrao) * L
+                
+        print("Volume:"+repr(volume))
+        
+        return volume
+
+
 # --------------------------------------------------------------------------
-# CONFIGURAÇÃO GERAL E EXECUÇÃO DO LOOP PRINCIPAL
+# CONFIGURAÇÃO GERAL DA ESTRUTURA
 # --------------------------------------------------------------------------
 pavimentos = 3
 blocos = 2
 
-path = "dados.csv"
+# Parametros Geometricos (SI: metros)
+L = 10.9728  
+H = 3.048    
 
+# Intervalos de variação para o Concreto
+h_padrao = 0.40
+b_padrao = 0.30
+
+h_min, h_max = 0.01, 1.0
+b_min, b_max = 0.01, 1.0
+
+penalidade = 0.0
+
+num_pilares = (blocos+1)*pavimentos
+num_vigas = blocos*pavimentos
+N = num_pilares + num_vigas
+
+
+path = "dados.csv"
 f = open(path, 'w')
 f.close()
 
 #Desativar quando não for mais teste!!!
 random.seed(42)
     
-num_pilares = (blocos+1)*pavimentos
-num_vigas = blocos*pavimentos
-N = num_pilares + num_vigas
 
 # Tamanho 3N: [0..N-1] -> Binário, [N..2N-1] -> h, [2N..3N-1] -> b
-sol = [0] * (3*N)   
+# sol = [0] * (3*N)   
 
-# Intervalos de variação para o Concreto (Ex: entre 30cm e 80cm)
-h_min, h_max = 0.01, 1.0
-b_min, b_max = 0.01, 1.0
-penalidade = 0.0
 
-def get_volume(sol):
-        
-        vol = 0
-        for i in range(N):
-            if i <= num_pilares:
-                vol +=  (sol[i+N] * sol[i+2*N]) * H
-            else: 
-                vol +=  (sol[i+N] * sol[i+2*N]) * L        
-
-        print("Volume:"+repr(vol))
-
-        return vol
 
 def gera_individuo():
     individuo = [0] * (3*N)
@@ -561,17 +529,12 @@ def mutacao(individuo, taxa_mutacao=0.01):
                 individuo[i] = round(random.uniform(b_min, b_max), 2)
     return individuo
 
-# Preenchendo o vetor solução de forma contínua
-#for i in range(N):
-#    sol[i] = random.randint(0, 1) # Define reforço (0 ou 1)
-    
-    # Sorteando floats para h e b uniformemente dentro do range
-#    sol[i + N] = round(random.uniform(h_min, h_max),2)
-#    sol[i + 2*N] = round(random.uniform(b_min, b_max),2)
 
-
+# --------------------------------------------------------------------------
+# CONFIGURAÇÃO DO ALGORITMO GENÉTICO (GA)
+# --------------------------------------------------------------------------
 tamanho_pop = 10
-num_geracoes = 20
+num_geracoes = 5
 taxa_crossover = 0.8
 
 tempo_inicio = time.time()
@@ -636,19 +599,3 @@ print("Melhor individuo:")
 print(melhor_global)
 
 print("Tempo total de execucao: %.2f min" % (tempo_total / 60.0))
-
-# Execução do loop de simulações com remoção progressiva
-#for i in range(num_pilares + 1):
-
-    #Gera e estrutura completa
-#    if i == num_pilares:
-#        gera_estrutura(sol, -1)
-#        break
-
-#    sol_local = sol[:]
-#    sol_local[i] = -1
-
-#    gera_estrutura(sol_local, i)
-#    run_job(i)
-    
-#    salva_info(path, sol_local, get_desloc_max_x(i))
