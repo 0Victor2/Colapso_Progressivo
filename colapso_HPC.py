@@ -673,8 +673,8 @@ for geracao in range(num_geracoes):
         if len(nova_populacao) < tamanho_pop:
             nova_populacao.append(filho2)
 
-    old_populacao = populacao
-    fitnesses_old = fitnesses
+    old_populacao = pais
+    fitnesses_old = pais_fitnesses
     populacao = nova_populacao
 
 
