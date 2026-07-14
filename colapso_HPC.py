@@ -99,7 +99,7 @@ def run_job(id):
     if job_name in mdb.jobs.keys():
         del mdb.jobs[job_name]
 
-    job = mdb.Job(name=job_name, model='Portico_2D_'+repr(id), type=ANALYSIS, memory=90, memoryUnits=PERCENTAGE)    
+    job = mdb.Job(name=job_name, model='Portico_2D_'+repr(id), type=ANALYSIS, memory=90, memoryUnits=PERCENTAGE, numCpus=6, numDomains=6, multiprocessingMode=DEFAULT)    
     job.submit(consistencyChecking=OFF)
     job.waitForCompletion()
 
@@ -109,7 +109,6 @@ def gera_estrutura(sol, id):
     model = mdb.models['Portico_2D_'+repr(id)]
 
     # Parametros Geometricos (SI: metros)
-
 
     # Geometria 
     s = model.ConstrainedSketch(name='__profile__', sheetSize=50.0)
@@ -127,6 +126,7 @@ def gera_estrutura(sol, id):
                 
             idx_viga += 1
 
+    pilares = []
     # Desenhando os pilares
     idx_pilar = 0
     for i in range(blocos+1):
@@ -137,12 +137,17 @@ def gera_estrutura(sol, id):
             
             if sol[idx_pilar] != -1:
                 s.Line(point1=(x, y_start), point2=(x, y_end))
+                pilares.append((x, y_start, y_end))
                 
             idx_pilar += 1
 
     # Criando a Part
     part = model.Part(name='Estrutura', dimensionality=TWO_D_PLANAR, type=DEFORMABLE_BODY)
     part.BaseWire(sketch=s)
+
+    for i, (x, y_start, y_end) in enumerate(pilares):
+        part.Set(edges=part.edges.findAt(((x, (y_start + y_end) / 2.0, 0.0),)), name='Pilar_%d' % i)
+
     del model.sketches['__profile__']
 
     # SETS
@@ -203,8 +208,8 @@ def gera_estrutura(sol, id):
                     b_val = sol[idx_pilar + 2*N]
                     
                     # Nome único para o perfil baseado em suas dimensões
-                    perfil_nome = 'Perf_Pilar_R_%.3fx%.3f' % (h_val, b_val)
-                    secao_pilar_name = 'Secao_Pilar_' + perfil_nome
+                    perfil_nome = 'Perf_R_%.3fx%.3f' % (h_val, b_val)
+                    secao_pilar_name = 'Secao_' + perfil_nome
                     
                     if perfil_nome not in model.profiles.keys():
                         model.RectangularProfile(name=perfil_nome, a=h_val, b=b_val)
@@ -222,9 +227,9 @@ def gera_estrutura(sol, id):
                     part.SectionAssignment(region=pilar_region, sectionName=secao_pilar_name)
                     
                 elif bit_ativo == 0:
-                    if 'Secao_Pilar_Padrao' not in model.sections.keys():
+                    if 'Secao_Padrao' not in model.sections.keys():
                         model.BeamSection(
-                            name='Secao_Pilar_Padrao',
+                            name='Secao_Padrao',
                             integration=DURING_ANALYSIS,
                             poissonRatio=0.2,
                             profile='Perfil_Padrao',
@@ -232,7 +237,7 @@ def gera_estrutura(sol, id):
                             temperatureVar=LINEAR
                         )
                     
-                    part.SectionAssignment(region=pilar_region, sectionName='Secao_Pilar_Padrao')
+                    part.SectionAssignment(region=pilar_region, sectionName='Secao_Padrao')
                 
                 idx_geometria_existente += 1
                 
@@ -257,8 +262,8 @@ def gera_estrutura(sol, id):
                     h_val = sol[idx_viga + N]
                     b_val = sol[idx_viga + 2*N]
                     
-                    perfil_nome = 'Perf_Viga_R_%.3fx%.3f' % (h_val, b_val)
-                    secao_viga_name = 'Secao_Viga_' + perfil_nome
+                    perfil_nome = 'Perf_R_%.3fx%.3f' % (h_val, b_val)
+                    secao_viga_name = 'Secao_' + perfil_nome
                     
                     if perfil_nome not in model.profiles.keys():
                         model.RectangularProfile(name=perfil_nome, a=h_val, b=b_val)
@@ -276,9 +281,9 @@ def gera_estrutura(sol, id):
                     part.SectionAssignment(region=viga_region, sectionName=secao_viga_name)
                     
                 elif bit_ativo == 0:
-                    if 'Secao_Viga_Padrao' not in model.sections.keys():
+                    if 'Secao_Padrao' not in model.sections.keys():
                         model.BeamSection(
-                            name='Secao_Viga_Padrao',
+                            name='Secao_Padrao',
                             integration=DURING_ANALYSIS,
                             poissonRatio=0.2,
                             profile='Perfil_Padrao',
@@ -286,7 +291,7 @@ def gera_estrutura(sol, id):
                             temperatureVar=LINEAR
                         )
                     
-                    part.SectionAssignment(region=viga_region, sectionName='Secao_Viga_Padrao')
+                    part.SectionAssignment(region=viga_region, sectionName='Secao_Padrao')
                 
                 idx_geometria_viga_existente += 1
                 
@@ -359,6 +364,8 @@ def gera_estrutura(sol, id):
     part.setElementType(regions=(all_edges,), elemTypes=(elemTypeBeam,))
     part.generateMesh()
     asm.regenerate()
+
+    return model
 
 def salva_info(path, sol, max_desloc_x, g, id):
 
@@ -442,27 +449,53 @@ def gera_individuo_viavel():
     
     return individuo
 
+def remove_pilares(model, path, sol, g, id):
+    penalidade_total = 0.0
+    pior_desloc_remocao = None
+    pior_caso_remocao = None
+    asm = model.rootAssembly
+    inst = asm.instances['Estrutura_Inst']
+    for i in range(num_pilares):
+        set_name = 'Pilar_%d' % i
+        print("Removendo pilar %d" % i)
+
+        if set_name not in inst.sets.keys():
+            continue  # Pular se o pilar não existir na instância
+
+        inter = model.ModelChange(name="REM", createStepName='Step_Cargas', region=inst.sets[set_name], activeInStep=False, includeStrain=False)
+        try:
+            run_job(id)
+            deslocamento_max = get_desloc_max_x(id)
+            if pior_desloc_remocao is None or deslocamento_max > pior_desloc_remocao:
+                pior_desloc_remocao = deslocamento_max
+                pior_caso_remocao = 'remocao_pilar_%d' % i
+            if deslocamento_max > limite_desloc:
+                penalidade_total += 1e6 * (deslocamento_max - limite_desloc)
+        except Exception as e:
+            log("Erro ao remover pilar %d: %s" % (i, repr(e)))
+            penalidade_total += 1e8  # Penalidade máxima se ocorrer erro
+        del model.interactions['REM']
+
+    return penalidade_total, pior_desloc_remocao, pior_caso_remocao
+
 def avalia_individuo(g, sol, id):
     try:
         tempo_ind_inicio = time.time()
 
         # limite_desloc = limite_desloc
-
-        pior_desloc = -1.0
-        pior_caso = None
         penalidade_total = 0.0
 
         # Avalia a estrutura original primeiro
         run_id = id * 1000
 
-        gera_estrutura(sol, run_id)
+        # model = gera_estrutura(sol, run_id)
+        model = gera_estrutura(sol, run_id)
         run_job(run_id)
 
         max_desloc_x = get_desloc_max_x(run_id)
 
-        if max_desloc_x > pior_desloc:
-            pior_desloc = max_desloc_x
-            pior_caso = "estrutura_completa"
+        pior_desloc = max_desloc_x
+        pior_caso = "estrutura_completa"
 
         if max_desloc_x > limite_desloc:
             penalidade_total += 1e6 * (max_desloc_x - limite_desloc)
@@ -470,28 +503,15 @@ def avalia_individuo(g, sol, id):
         salva_info(path, sol, max_desloc_x, g, id)
 
         # Remocao progressiva dos pilares
-        for i in range(num_pilares):
+        penalidade_rem, pior_desloc_rem, pior_caso_rem = remove_pilares(model, path, sol, g, run_id)
 
-            # Remove um pilar, mantendo os anteriores removidos
-            sol_removida = sol[:]
+        penalidade_total += penalidade_rem
 
-            sol_removida[i] = -1
+        if pior_desloc_remocao is not None and pior_desloc_remocao > pior_desloc:
+            pior_desloc = pior_desloc_remocao
+            pior_caso = pior_caso_remocao
 
-            run_id = id * 1000 + i + 1
-
-            gera_estrutura(sol_removida, run_id)
-            run_job(run_id)
-
-            max_desloc_x = get_desloc_max_x(run_id)
-
-            if max_desloc_x > pior_desloc:
-                pior_desloc = max_desloc_x
-                pior_caso = "remocao_progressiva_ate_pilar_" + repr(i)
-
-            if max_desloc_x > limite_desloc:
-                penalidade_total += 1e6 * (max_desloc_x - limite_desloc)
-
-            salva_info(path, sol_removida, max_desloc_x, g, id)
+        salva_info(path, sol, pior_desloc, g, id)
 
         custo = get_custo(sol)
 
@@ -536,13 +556,14 @@ def cross_over(pai1, pai2):
 def mutacao(individuo, taxa_mutacao=0.01):
 
     for i in range(3*N):
+        valor_atual = individuo[i]
         if random.random() < taxa_mutacao:
             if i < N:  # Mutação para bits binários
-                individuo[i] = 1 - individuo[i]  # Inverte o bit
+                individuo[i] = 1 - valor_atual  # Inverte o bit
             elif N <= i < 2*N:  # Mutação para h
-                individuo[i] = round(random.uniform(individuo[i+N]*0.85, individuo[i+N]*1.15), 2)
+                individuo[i] = round(random.uniform(max(valor_atual * 0.85, h_min), min(individuo[i+N]*1.15, h_max)), 2)
             else:  # Mutação para b
-                individuo[i] = round(random.uniform(individuo[i-N]*0.85, individuo[i-N]*1.15), 2)
+                individuo[i] = round(random.uniform(max(valor_atual * 0.85, b_min), min(individuo[i-N]*1.15, b_max)), 2)
     return individuo
 
 
@@ -584,7 +605,7 @@ penalidade = 0.0
 limite_desloc = 0.03048
 
 #Configurações GA
-tamanho_pop = 5
+tamanho_pop = 20
 num_geracoes = 10
 taxa_crossover = 0.8
 
