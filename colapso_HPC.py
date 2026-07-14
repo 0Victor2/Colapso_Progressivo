@@ -507,9 +507,9 @@ def avalia_individuo(g, sol, id):
 
         penalidade_total += penalidade_rem
 
-        if pior_desloc_remocao is not None and pior_desloc_remocao > pior_desloc:
-            pior_desloc = pior_desloc_remocao
-            pior_caso = pior_caso_remocao
+        if pior_desloc_rem is not None and pior_desloc_rem > pior_desloc:
+            pior_desloc = pior_desloc_rem
+            pior_caso = pior_caso_rem
 
         salva_info(path, sol, pior_desloc, g, id)
 
