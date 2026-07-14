@@ -30,8 +30,7 @@ import sys
 # DEFINIÇÕES DE FUNÇÕES
 # --------------------------------------------------------------------------
 def log(message):
-    sys.__stdout__.write(str(message) + '\n')
-    sys.__stdout__.flush()
+    print(str(message) + '\n')
 
 def get_tensao_max(id):
 
@@ -367,13 +366,15 @@ def gera_estrutura(sol, id):
 
     return model
 
-def salva_info(path, sol, max_desloc_x, g, id):
+def salva_info(path, sol, max_desloc_x, g, id, pilar_rem):
 
     f = open(path, 'a')
 
     f.write(repr(g)+'; ')   
     
     f.write(repr(id)+'; ')   
+
+    f.write(repr(pilar_rem)+'; ')
 
     for i in range(len(sol)):
         f.write(repr(sol[i])+'; ')
@@ -466,6 +467,7 @@ def remove_pilares(model, path, sol, g, id):
         try:
             run_job(id)
             deslocamento_max = get_desloc_max_x(id)
+            salva_info(path, sol, deslocamento_max, g, id, i)
             if pior_desloc_remocao is None or deslocamento_max > pior_desloc_remocao:
                 pior_desloc_remocao = deslocamento_max
                 pior_caso_remocao = 'remocao_pilar_%d' % i
@@ -486,7 +488,7 @@ def avalia_individuo(g, sol, id):
         penalidade_total = 0.0
 
         # Avalia a estrutura original primeiro
-        run_id = id * 1000
+        run_id = g * 1000 + id  # Garante que cada execução tenha um ID único
 
         # model = gera_estrutura(sol, run_id)
         model = gera_estrutura(sol, run_id)
@@ -500,7 +502,7 @@ def avalia_individuo(g, sol, id):
         if max_desloc_x > limite_desloc:
             penalidade_total += 1e6 * (max_desloc_x - limite_desloc)
 
-        salva_info(path, sol, max_desloc_x, g, id)
+        salva_info(path, sol, max_desloc_x, g, id, -1)
 
         # Remocao progressiva dos pilares
         penalidade_rem, pior_desloc_rem, pior_caso_rem = remove_pilares(model, path, sol, g, run_id)
@@ -510,8 +512,6 @@ def avalia_individuo(g, sol, id):
         if pior_desloc_rem is not None and pior_desloc_rem > pior_desloc:
             pior_desloc = pior_desloc_rem
             pior_caso = pior_caso_rem
-
-        salva_info(path, sol, pior_desloc, g, id)
 
         custo = get_custo(sol)
 
@@ -546,6 +546,12 @@ def torneio(populacao, fitnesses, k=3):
     sorted_indices = sorted(range(len(bests_fitnesses)), key=lambda i: bests_fitnesses[i])
 
     return [bests[i] for i in sorted_indices[:(k-1)]]
+
+def best_population(populacao_plus, fitnesses_plus, n_pop):
+    sorted_indices = sorted(range(len(fitnesses_plus)), key=lambda i: fitnesses_plus[i])
+    best_individuals = [populacao_plus[i] for i in sorted_indices[:n_pop]]
+    best_fitnesses = [fitnesses_plus[i] for i in sorted_indices[:n_pop]]
+    return best_individuals, best_fitnesses
 
 def cross_over(pai1, pai2):
     ponto_corte = random.randint(1, len(pai1) - 2)
@@ -615,6 +621,8 @@ taxa_crossover = 0.8
 # --------------------------------------------------------------------------
 tempo_inicio = time.time()
 populacao = []
+old_populacao = []
+fitnesses_old = []
 melhor_global, melhor_fitness, melhor_desloc, melhor_custo = None, float('inf'), None, None
 
 for i in range(tamanho_pop):
@@ -641,9 +649,12 @@ for geracao in range(num_geracoes):
             melhor_custo = custo
 
     nova_populacao = []
+    populacao_plus = populacao + old_populacao
+    fitnesses_plus = fitnesses + fitnesses_old
 
     while len(nova_populacao) < tamanho_pop:
-        bests = torneio(populacao, fitnesses)
+        pais, pais_fitnesses = best_population(populacao_plus, fitnesses_plus, tamanho_pop)
+        bests = torneio(pais, pais_fitnesses)
         pai1 = random.choice(bests)
         pai2 = random.choice(bests)
         while pai1 == pai2:
@@ -662,6 +673,8 @@ for geracao in range(num_geracoes):
         if len(nova_populacao) < tamanho_pop:
             nova_populacao.append(filho2)
 
+    old_populacao = populacao
+    fitnesses_old = fitnesses
     populacao = nova_populacao
 
 
