@@ -31,6 +31,7 @@ import sys
 # --------------------------------------------------------------------------
 def log(message):
     print(str(message) + '\n')
+    print >> sys.__stdout__, message
 
 def get_tensao_max(id):
 
@@ -384,11 +385,38 @@ def salva_info(path, sol, max_desloc_x, g, id, pilar_rem):
     f.write(repr(get_custo(sol))+';')
 
     if max_desloc_x < limite_desloc:
-        f.write("VIAVEL")
+        f.write(" VIAVEL")
     else:
-        f.write("INVIAVEL")
+        f.write(" INVIAVEL")
 
     f.write('\n')
+    f.close()
+    
+def salva_populacao(path, populacao):
+    
+    f = open(path, 'w')
+    
+    for i in range(len(populacao)):    
+        for j in range(3*N):
+            if j < 3*N-1:
+                f.write(repr(populacao[i][j])+"; ")
+            else:
+                f.write(repr(populacao[i][j]))
+        f.write("\n")
+    f.close()
+    
+def salva_melhores(path, geracao, melhor, fitness):
+    
+    f = open(path, 'a')
+    
+    f.write(repr(geracao) + "; ")
+      
+    for j in range(3*N):
+            f.write(repr(melhor[j])+"; ")        
+                
+    f.write(repr(fitness))
+
+    f.write("\n")
     f.close()
 
 def get_custo(sol):
@@ -584,8 +612,12 @@ L = 10.9728
 H = 3.048  
 
 path = "dados.csv"
+path_pop = "last_populacao.csv"
+path_bests = "bests.csv"
 
 f = open(path, 'w')
+f.close()
+f = open(path_bests, 'w')
 f.close()
 
 #Desativar quando não for mais teste!!!
@@ -626,14 +658,17 @@ fitnesses_old = []
 melhor_global, melhor_fitness, melhor_desloc, melhor_custo = None, float('inf'), None, None
 
 for i in range(tamanho_pop):
-    if i <= 3:
+    if i == 0:
         individuo = gera_individuo_viavel()
     else:
         individuo = gera_individuo()
     populacao.append(individuo)
+ 
 
 for geracao in range(num_geracoes):
     fitnesses = []
+    
+    salva_populacao(path_pop, populacao)
 
     log("\n\nGERACAO " + repr(geracao) + ':')
 
@@ -657,8 +692,8 @@ for geracao in range(num_geracoes):
         bests = torneio(pais, pais_fitnesses)
         pai1 = random.choice(bests)
         pai2 = random.choice(bests)
-        while pai1 == pai2:
-            pai2 = random.choice(bests)
+        # while pai1 == pai2:
+        #     pai2 = random.choice(bests)
 
         if random.random() < taxa_crossover:
             filho1, filho2 = cross_over(pai1, pai2)
@@ -676,6 +711,8 @@ for geracao in range(num_geracoes):
     old_populacao = pais
     fitnesses_old = pais_fitnesses
     populacao = nova_populacao
+    
+    salva_melhores(path_bests, geracao, melhor_global, melhor_fitness)
 
 
 tempo_total = time.time() - tempo_inicio
