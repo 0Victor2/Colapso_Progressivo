@@ -392,7 +392,7 @@ def salva_info(path, sol, max_desloc_x, g, id, pilar_rem):
     f.write('\n')
     f.close()
     
-def salva_populacao(path, populacao):
+def salva_populacao(path, populacao, geracao):
     
     f = open(path, 'w')
     
@@ -403,9 +403,37 @@ def salva_populacao(path, populacao):
             else:
                 f.write(repr(populacao[i][j]))
         f.write("\n")
+    f.write(repr(geracao))
     f.close()
     
-def salva_melhores(path, geracao, melhor, fitness):
+    
+def carrega_populacao(path):
+
+    f = open(path, 'r')
+
+    linhas = f.readlines()
+    f.close()
+
+    populacao = []
+
+    geracao = eval(linhas[-1].strip())
+
+    for linha in linhas[:-1]:
+
+        linha = linha.strip()
+
+        if linha != "":
+            individuo = []
+            dados = linha.split(";")
+
+            for valor in dados:
+                individuo.append(eval(valor.strip()))
+
+            populacao.append(individuo)
+
+    return populacao, geracao
+
+def salva_historico_melhor(path, geracao, melhor, fitness):
     
     f = open(path, 'a')
     
@@ -566,14 +594,26 @@ def avalia_individuo(g, sol, id):
         log("Erro ao avaliar individuo " + repr(id) + ": " + repr(e))
         return float('inf'), "ERRO", None, None
 
+# def torneio(populacao, fitnesses, k=3):
+
+#     bests = populacao[:]
+#     bests_fitnesses = fitnesses[:]
+
+#     sorted_indices = sorted(range(len(bests_fitnesses)), key=lambda i: bests_fitnesses[i])
+
+#     return [bests[i] for i in sorted_indices[:(k-1)]]
+
 def torneio(populacao, fitnesses, k=3):
 
-    bests = populacao[:]
-    bests_fitnesses = fitnesses[:]
+    candidatos = random.sample(range(len(populacao)), k)
 
-    sorted_indices = sorted(range(len(bests_fitnesses)), key=lambda i: bests_fitnesses[i])
+    melhor = candidatos[0]
 
-    return [bests[i] for i in sorted_indices[:(k-1)]]
+    for i in candidatos[1:]:
+        if fitnesses[i] < fitnesses[melhor]:
+            melhor = i
+
+    return populacao[melhor][:]
 
 def best_population(populacao_plus, fitnesses_plus, n_pop):
     sorted_indices = sorted(range(len(fitnesses_plus)), key=lambda i: fitnesses_plus[i])
@@ -615,10 +655,6 @@ path = "dados.csv"
 path_pop = "last_populacao.csv"
 path_bests = "bests.csv"
 
-f = open(path, 'w')
-f.close()
-f = open(path_bests, 'w')
-f.close()
 
 #Desativar quando não for mais teste!!!
 random.seed(42)
@@ -643,8 +679,8 @@ penalidade = 0.0
 limite_desloc = 0.03048
 
 #Configurações GA
-tamanho_pop = 20
-num_geracoes = 10
+tamanho_pop = 3
+num_geracoes = 2
 taxa_crossover = 0.8
 
 
@@ -657,18 +693,33 @@ old_populacao = []
 fitnesses_old = []
 melhor_global, melhor_fitness, melhor_desloc, melhor_custo = None, float('inf'), None, None
 
-for i in range(tamanho_pop):
-    if i == 0:
-        individuo = gera_individuo_viavel()
-    else:
-        individuo = gera_individuo()
-    populacao.append(individuo)
+retomar = False
+geracao_inicio = 0
+
+if retomar == True:
+
+    populacao, geracao_inicio = carrega_populacao(path_pop)
+
+else:
+    
+    #Limpa os arquivos
+    f = open(path, 'w')
+    f.close()
+    f = open(path_bests, 'w')
+    f.close()
+    
+    for i in range(tamanho_pop):
+        if i == 0:
+            individuo = gera_individuo_viavel()
+        else:
+            individuo = gera_individuo()
+        populacao.append(individuo)
  
 
-for geracao in range(num_geracoes):
+for geracao in range(geracao_inicio, num_geracoes):
     fitnesses = []
     
-    salva_populacao(path_pop, populacao)
+    salva_populacao(path_pop, populacao, geracao)
 
     log("\n\nGERACAO " + repr(geracao) + ':')
 
@@ -677,7 +728,7 @@ for geracao in range(num_geracoes):
         fitness, viabilidade, max_desloc_x, custo = avalia_individuo(geracao, individuo, run_id)
         fitnesses.append(fitness)
 
-        if fitness < melhor_fitness:
+        if viabilidade == 'VIAVEL' and fitness < melhor_fitness:
             melhor_fitness = fitness
             melhor_global = individuo[:]
             melhor_desloc = max_desloc_x
@@ -687,32 +738,38 @@ for geracao in range(num_geracoes):
     populacao_plus = populacao + old_populacao
     fitnesses_plus = fitnesses + fitnesses_old
 
+        
+    populacao_plus = populacao + old_populacao
+    fitnesses_plus = fitnesses + fitnesses_old
+
+    pais, pais_fitnesses = best_population(populacao_plus, fitnesses_plus, tamanho_pop)
+
+    nova_populacao = []
+
     while len(nova_populacao) < tamanho_pop:
-        pais, pais_fitnesses = best_population(populacao_plus, fitnesses_plus, tamanho_pop)
-        bests = torneio(pais, pais_fitnesses)
-        pai1 = random.choice(bests)
-        pai2 = random.choice(bests)
+
+        pai1 = torneio(pais, pais_fitnesses)
+        pai2 = torneio(pais, pais_fitnesses)
+
         # while pai1 == pai2:
-        #     pai2 = random.choice(bests)
+        #     pai2 = torneio(populacao_plus, fitnesses_plus)
 
         if random.random() < taxa_crossover:
             filho1, filho2 = cross_over(pai1, pai2)
         else:
             filho1, filho2 = pai1[:], pai2[:]
 
-        filho1 = mutacao(filho1)
-        filho2 = mutacao(filho2)
-
-        nova_populacao.append(filho1)
+        nova_populacao.append(mutacao(filho1))
 
         if len(nova_populacao) < tamanho_pop:
-            nova_populacao.append(filho2)
+            nova_populacao.append(mutacao(filho2))
 
     old_populacao = pais
     fitnesses_old = pais_fitnesses
     populacao = nova_populacao
     
-    salva_melhores(path_bests, geracao, melhor_global, melhor_fitness)
+    if melhor_global is not None:
+        salva_historico_melhor(path_bests, geracao, melhor_global, melhor_fitness)
 
 
 tempo_total = time.time() - tempo_inicio
