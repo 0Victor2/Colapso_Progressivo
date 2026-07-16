@@ -22,6 +22,7 @@ from odbAccess import openOdb
 import numpy as np
 import random
 import time
+import os
 
 import sys
 
@@ -30,8 +31,24 @@ import sys
 # DEFINIÇÕES DE FUNÇÕES
 # --------------------------------------------------------------------------
 def log(message):
-    print(str(message) + '\n')
-    print >> sys.__stdout__, message
+
+    texto = str(message)
+
+    # Imprime na área de mensagens do Abaqus/CAE
+    print(texto)
+
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    # Imprime também no terminal que iniciou o Abaqus
+    try:
+        if sys.__stdout__ is not None and sys.__stdout__ is not sys.stdout:
+            sys.__stdout__.write(texto + '\n')
+            sys.__stdout__.flush()
+    except Exception:
+        pass
 
 def get_tensao_max(id):
 
@@ -96,17 +113,44 @@ def run_job(id):
      
     #Job
     job_name = 'Job_Portico2D_HPC_'+repr(id)
+    model_name = 'Portico_2D_'+repr(id)
+
     if job_name in mdb.jobs.keys():
         del mdb.jobs[job_name]
 
-    job = mdb.Job(name=job_name, model='Portico_2D_'+repr(id), type=ANALYSIS, memory=90, memoryUnits=PERCENTAGE, numCpus=6, numDomains=6, multiprocessingMode=DEFAULT)    
+    # Remove arquivos antigos para impedir a leitura de resultados de outro job
+    arquivos_antigos = [
+        job_name + '.odb',
+        job_name + '.lck',
+        job_name + '.sta',
+        job_name + '.msg',
+        job_name + '.dat'
+    ]
+
+    for arquivo in arquivos_antigos:
+        if os.path.exists(arquivo):
+            try:
+                os.remove(arquivo)
+            except Exception:
+                pass
+
+    job = mdb.Job(name=job_name, model=model_name, type=ANALYSIS, memory=90, memoryUnits=PERCENTAGE, numCpus=6, numDomains=6, multiprocessingMode=DEFAULT)    
     job.submit(consistencyChecking=OFF)
     job.waitForCompletion()
 
+    if job.status != COMPLETED:
+        raise RuntimeError("Job %s terminou com status %s" % (job_name, str(job.status)))
+
 def gera_estrutura(sol, id):
 
-    mdb.Model(modelType=STANDARD_EXPLICIT, name='Portico_2D_'+repr(id))
-    model = mdb.models['Portico_2D_'+repr(id)]
+    model_name = 'Portico_2D_' + repr(id)
+
+    if model_name in mdb.models.keys():
+        del mdb.models[model_name]
+
+    mdb.Model(modelType=STANDARD_EXPLICIT, name=model_name )
+
+    model = mdb.models[model_name]
 
     # Parametros Geometricos (SI: metros)
 
@@ -392,7 +436,7 @@ def salva_info(path, sol, max_desloc_x, g, id, pilar_rem):
     f.write('\n')
     f.close()
     
-def salva_populacao(path, populacao, geracao):
+def salva_populacao(path, populacao):
     
     f = open(path, 'w')
     
@@ -403,37 +447,38 @@ def salva_populacao(path, populacao, geracao):
             else:
                 f.write(repr(populacao[i][j]))
         f.write("\n")
-    f.write(repr(geracao))
-    f.close()
-    
-    
-def carrega_populacao(path):
-
-    f = open(path, 'r')
-
-    linhas = f.readlines()
     f.close()
 
-    populacao = []
+def limpa_execucao(id):
 
-    geracao = eval(linhas[-1].strip())
+    job_name = 'Job_Portico2D_HPC_' + repr(id)
+    model_name = 'Portico_2D_' + repr(id)
 
-    for linha in linhas[:-1]:
+    if job_name in mdb.jobs.keys():
+        del mdb.jobs[job_name]
 
-        linha = linha.strip()
+    if model_name in mdb.models.keys():
+        del mdb.models[model_name]
 
-        if linha != "":
-            individuo = []
-            dados = linha.split(";")
+    arquivos = [
+        job_name + '.odb',
+        job_name + '.lck',
+        job_name + '.sta',
+        job_name + '.msg',
+        job_name + '.dat',
+        job_name + '.com',
+        job_name + '.prt',
+        job_name + '.sim'
+    ]
 
-            for valor in dados:
-                individuo.append(eval(valor.strip()))
-
-            populacao.append(individuo)
-
-    return populacao, geracao
-
-def salva_historico_melhor(path, geracao, melhor, fitness):
+    for arquivo in arquivos:
+        if os.path.exists(arquivo):
+            try:
+                os.remove(arquivo)
+            except Exception:
+                pass    
+    
+def salva_melhores(path, geracao, melhor, fitness):
     
     f = open(path, 'a')
     
@@ -449,12 +494,8 @@ def salva_historico_melhor(path, geracao, melhor, fitness):
 
 def get_custo(sol):
 
-    volume_HPC = 0
-    volume_concreto = 0
-
-    #Custo Materiais (Custo por metro cubico)
-    custo_HPC = 13000
-    custo_concreto = 500
+    volume_HPC = 0.0
+    volume_concreto = 0.0
 
     for i in range(0,N):
 
@@ -476,7 +517,7 @@ def get_custo(sol):
 
     # volume_total = volume_HPC + volume_concreto
 
-    custo_total = volume_HPC * custo_HPC + volume_concreto * custo_concreto
+    custo_total = volume_HPC * CUSTO_HPC_M3 + volume_concreto * CUSTO_CONCRETO_M3
             
     # log("Custo:"+repr(custo_total))
     
@@ -494,59 +535,66 @@ def gera_individuo():
     
     return individuo
 
-def gera_individuo_viavel():
+def gera_individuo_reforcado():
     individuo = [1] * (3*N)
     
     for i in range(N):
-        # Sorteando floats para h e b uniformemente dentro do range
-        individuo[i + N] = round(random.uniform(h_max-(0.1*h_max), h_max),2)
-        individuo[i + 2*N] = round(random.uniform(b_max-(0.1*b_max), b_max),2)
-        # individuo[i + N] = h_max
-        # individuo[i + 2*N] = b_max
+        # Define o primeiro indivíduo com o reforço máximo permitido
+        # individuo[i + N] = round(random.uniform(h_max-(0.1*h_max), h_max),2)
+        # individuo[i + 2*N] = round(random.uniform(b_max-(0.1*b_max), b_max),2)
+        individuo[i + N] = h_max
+        individuo[i + 2*N] = b_max
     
     return individuo
 
-def remove_pilares(model, path, sol, g, id):
+def remove_pilares(model, path, sol, g, id_individuo, run_id):
     penalidade_total = 0.0
     pior_desloc_remocao = None
     pior_caso_remocao = None
     asm = model.rootAssembly
     inst = asm.instances['Estrutura_Inst']
+
     for i in range(num_pilares):
         set_name = 'Pilar_%d' % i
-        print("Removendo pilar %d" % i)
+        log("Removendo pilar %d" % i)
 
         if set_name not in inst.sets.keys():
             continue  # Pular se o pilar não existir na instância
 
         inter = model.ModelChange(name="REM", createStepName='Step_Cargas', region=inst.sets[set_name], activeInStep=False, includeStrain=False)
+
         try:
-            run_job(id)
-            deslocamento_max = get_desloc_max_x(id)
-            salva_info(path, sol, deslocamento_max, g, id, i)
+            run_job(run_id)
+            deslocamento_max = get_desloc_max_x(run_id)
+
+            salva_info(path, sol, deslocamento_max, g, id_individuo, i)
+
             if pior_desloc_remocao is None or deslocamento_max > pior_desloc_remocao:
                 pior_desloc_remocao = deslocamento_max
                 pior_caso_remocao = 'remocao_pilar_%d' % i
+
             if deslocamento_max > limite_desloc:
                 penalidade_total += 1e6 * (deslocamento_max - limite_desloc)
+
         except Exception as e:
             log("Erro ao remover pilar %d: %s" % (i, repr(e)))
             penalidade_total += 1e8  # Penalidade máxima se ocorrer erro
-        del model.interactions['REM']
+
+        finally:
+            if 'REM' in model.interactions.keys():
+                del model.interactions['REM']
 
     return penalidade_total, pior_desloc_remocao, pior_caso_remocao
 
 def avalia_individuo(g, sol, id):
+    run_id = None
+
     try:
         tempo_ind_inicio = time.time()
-
-        # limite_desloc = limite_desloc
         penalidade_total = 0.0
 
-        # Avalia a estrutura original primeiro
-        run_id = g * 1000 + id  # Garante que cada execução tenha um ID único
+        run_id = g * 1000 + id
 
-        # model = gera_estrutura(sol, run_id)
         model = gera_estrutura(sol, run_id)
         run_job(run_id)
 
@@ -560,8 +608,7 @@ def avalia_individuo(g, sol, id):
 
         salva_info(path, sol, max_desloc_x, g, id, -1)
 
-        # Remocao progressiva dos pilares
-        penalidade_rem, pior_desloc_rem, pior_caso_rem = remove_pilares(model, path, sol, g, run_id)
+        penalidade_rem, pior_desloc_rem, pior_caso_rem = remove_pilares(model, path, sol, g, id, run_id)
 
         penalidade_total += penalidade_rem
 
@@ -573,10 +620,11 @@ def avalia_individuo(g, sol, id):
 
         if penalidade_total == 0.0:
             viabilidade = "VIAVEL"
+            fitness = custo
         else:
             viabilidade = "INVIAVEL"
+            fitness = PENALIDADE_BASE + custo + penalidade_total
 
-        fitness = custo + penalidade_total
         tempo_ind = time.time() - tempo_ind_inicio
 
         log("\nIndividuo: " + repr(id))
@@ -594,32 +642,20 @@ def avalia_individuo(g, sol, id):
         log("Erro ao avaliar individuo " + repr(id) + ": " + repr(e))
         return float('inf'), "ERRO", None, None
 
-# def torneio(populacao, fitnesses, k=3):
+    finally:
+        if run_id is not None:
+            try:
+                limpa_execucao(run_id)
+            except Exception as e:
+                log("Aviso: erro durante a limpeza: " + repr(e))
 
-#     bests = populacao[:]
-#     bests_fitnesses = fitnesses[:]
+def seleciona_pai_torneio(populacao, fitnesses, k=3):
 
-#     sorted_indices = sorted(range(len(bests_fitnesses)), key=lambda i: bests_fitnesses[i])
+    quantidade = min(k, len(populacao))
+    participantes = random.sample(range(len(populacao)), quantidade)
+    melhor_indice = min(participantes, key=lambda i: fitnesses[i])
 
-#     return [bests[i] for i in sorted_indices[:(k-1)]]
-
-def torneio(populacao, fitnesses, k=3):
-
-    candidatos = random.sample(range(len(populacao)), k)
-
-    melhor = candidatos[0]
-
-    for i in candidatos[1:]:
-        if fitnesses[i] < fitnesses[melhor]:
-            melhor = i
-
-    return populacao[melhor][:]
-
-def best_population(populacao_plus, fitnesses_plus, n_pop):
-    sorted_indices = sorted(range(len(fitnesses_plus)), key=lambda i: fitnesses_plus[i])
-    best_individuals = [populacao_plus[i] for i in sorted_indices[:n_pop]]
-    best_fitnesses = [fitnesses_plus[i] for i in sorted_indices[:n_pop]]
-    return best_individuals, best_fitnesses
+    return populacao[melhor_indice][:]
 
 def cross_over(pai1, pai2):
     ponto_corte = random.randint(1, len(pai1) - 2)
@@ -635,9 +671,9 @@ def mutacao(individuo, taxa_mutacao=0.01):
             if i < N:  # Mutação para bits binários
                 individuo[i] = 1 - valor_atual  # Inverte o bit
             elif N <= i < 2*N:  # Mutação para h
-                individuo[i] = round(random.uniform(max(valor_atual * 0.85, h_min), min(individuo[i+N]*1.15, h_max)), 2)
+                individuo[i] = round(random.uniform(max(valor_atual * 0.85, h_min), min(valor_atual * 1.15, h_max)), 2)
             else:  # Mutação para b
-                individuo[i] = round(random.uniform(max(valor_atual * 0.85, b_min), min(individuo[i-N]*1.15, b_max)), 2)
+                individuo[i] = round(random.uniform(max(valor_atual * 0.85, b_min), min(valor_atual * 1.15, b_max)), 2)
     return individuo
 
 
@@ -651,17 +687,44 @@ blocos = 2
 L = 10.9728  
 H = 3.048  
 
+num_pilares = (blocos+1)*pavimentos
+num_vigas = blocos*pavimentos
+N = num_pilares + num_vigas
+
 path = "dados.csv"
 path_pop = "last_populacao.csv"
 path_bests = "bests.csv"
 
+f = open(path, 'w')
+
+cabecalho = [
+    'geracao',
+    'individuo',
+    'pilar_removido'
+]
+
+for i in range(N):
+    cabecalho.append('reforco_%d' % i)
+
+for i in range(N):
+    cabecalho.append('h_%d' % i)
+
+for i in range(N):
+    cabecalho.append('b_%d' % i)
+
+cabecalho.extend([
+    'deslocamento_max',
+    'custo',
+    'status_cenario'
+])
+
+f.write('; '.join(cabecalho) + '\n')
+f.close()
+f = open(path_bests, 'w')
+f.close()
 
 #Desativar quando não for mais teste!!!
 random.seed(42)
-    
-num_pilares = (blocos+1)*pavimentos
-num_vigas = blocos*pavimentos
-N = num_pilares + num_vigas
 
 # Tamanho 3N: [0..N-1] -> Binário, [N..2N-1] -> h, [2N..3N-1] -> b
 sol = [0] * (3*N)   
@@ -678,10 +741,20 @@ penalidade = 0.0
 
 limite_desloc = 0.03048
 
+#Custo Materiais (Custo por metro cubico)
+CUSTO_HPC_M3 = 13000.0
+CUSTO_CONCRETO_M3 = 500.0
+
+# Penalidade maior que o custo máximo teórico da estrutura
+comprimento_total = num_pilares * H + num_vigas * L
+custo_maximo_teorico = comprimento_total * h_max * b_max * CUSTO_HPC_M3
+PENALIDADE_BASE = 10.0 * custo_maximo_teorico
+
 #Configurações GA
-tamanho_pop = 3
-num_geracoes = 2
+tamanho_pop = 20
+num_geracoes = 10
 taxa_crossover = 0.8
+numero_elites = 2
 
 
 # --------------------------------------------------------------------------
@@ -689,37 +762,29 @@ taxa_crossover = 0.8
 # --------------------------------------------------------------------------
 tempo_inicio = time.time()
 populacao = []
-old_populacao = []
-fitnesses_old = []
-melhor_global, melhor_fitness, melhor_desloc, melhor_custo = None, float('inf'), None, None
+melhor_global = None
+melhor_fitness = float('inf')
+melhor_desloc = None
+melhor_custo = None
+melhor_viabilidade = None
 
-retomar = False
-geracao_inicio = 0
+melhor_viavel_global = None
+melhor_custo_viavel = float('inf')
+melhor_desloc_viavel = None
+melhor_fitness_viavel = float('inf')
 
-if retomar == True:
-
-    populacao, geracao_inicio = carrega_populacao(path_pop)
-
-else:
-    
-    #Limpa os arquivos
-    f = open(path, 'w')
-    f.close()
-    f = open(path_bests, 'w')
-    f.close()
-    
-    for i in range(tamanho_pop):
-        if i == 0:
-            individuo = gera_individuo_viavel()
-        else:
-            individuo = gera_individuo()
-        populacao.append(individuo)
+for i in range(tamanho_pop):
+    if i == 0:
+        individuo = gera_individuo_reforcado()
+    else:
+        individuo = gera_individuo()
+    populacao.append(individuo)
  
 
-for geracao in range(geracao_inicio, num_geracoes):
+for geracao in range(num_geracoes):
     fitnesses = []
     
-    salva_populacao(path_pop, populacao, geracao)
+    salva_populacao(path_pop, populacao)
 
     log("\n\nGERACAO " + repr(geracao) + ':')
 
@@ -728,63 +793,76 @@ for geracao in range(geracao_inicio, num_geracoes):
         fitness, viabilidade, max_desloc_x, custo = avalia_individuo(geracao, individuo, run_id)
         fitnesses.append(fitness)
 
-        if viabilidade == 'VIAVEL' and fitness < melhor_fitness:
+        # Melhor indivíduo geral
+        if fitness < melhor_fitness:
             melhor_fitness = fitness
             melhor_global = individuo[:]
             melhor_desloc = max_desloc_x
             melhor_custo = custo
+            melhor_viabilidade = viabilidade
+
+        # Melhor indivíduo realmente viável
+        if viabilidade == "VIAVEL" and custo is not None and custo < melhor_custo_viavel:
+            melhor_viavel_global = individuo[:]
+            melhor_custo_viavel = custo
+            melhor_desloc_viavel = max_desloc_x
+            melhor_fitness_viavel = fitness
+
+    # Elitismo: copia os melhores sem crossover e sem mutação
+    indices_ordenados = sorted(range(len(populacao)), key=lambda i: fitnesses[i])
+    indices_elite = indices_ordenados[:numero_elites]
 
     nova_populacao = []
-    populacao_plus = populacao + old_populacao
-    fitnesses_plus = fitnesses + fitnesses_old
 
-        
-    populacao_plus = populacao + old_populacao
-    fitnesses_plus = fitnesses + fitnesses_old
-
-    pais, pais_fitnesses = best_population(populacao_plus, fitnesses_plus, tamanho_pop)
-
-    nova_populacao = []
+    for indice in indices_elite:
+        nova_populacao.append(populacao[indice][:])
 
     while len(nova_populacao) < tamanho_pop:
-
-        pai1 = torneio(pais, pais_fitnesses)
-        pai2 = torneio(pais, pais_fitnesses)
-
-        # while pai1 == pai2:
-        #     pai2 = torneio(populacao_plus, fitnesses_plus)
+        pai1 = seleciona_pai_torneio(populacao, fitnesses, k=3)
+        pai2 = seleciona_pai_torneio(populacao, fitnesses, k=3)
 
         if random.random() < taxa_crossover:
             filho1, filho2 = cross_over(pai1, pai2)
         else:
             filho1, filho2 = pai1[:], pai2[:]
 
-        nova_populacao.append(mutacao(filho1))
+        filho1 = mutacao(filho1)
+        filho2 = mutacao(filho2)
+
+        nova_populacao.append(filho1)
 
         if len(nova_populacao) < tamanho_pop:
-            nova_populacao.append(mutacao(filho2))
+            nova_populacao.append(filho2)
 
-    old_populacao = pais
-    fitnesses_old = pais_fitnesses
     populacao = nova_populacao
     
-    if melhor_global is not None:
-        salva_historico_melhor(path_bests, geracao, melhor_global, melhor_fitness)
+    if melhor_viavel_global is not None:
+        salva_melhores(path_bests, geracao, melhor_viavel_global, melhor_fitness_viavel)
+    elif melhor_global is not None:
+        salva_melhores(path_bests, geracao, melhor_global, melhor_fitness)
 
 
 tempo_total = time.time() - tempo_inicio
 
-log("\n\nMELHOR SOLUCAO ENCONTRADA")
-log("Melhor fitness: " + repr(melhor_fitness))
-log("Melhor custo: " + repr(melhor_custo))
-log("Melhor deslocamento maximo X: " + repr(melhor_desloc))
-
-if melhor_desloc is not None and melhor_desloc < limite_desloc:
+if melhor_viavel_global is not None:
+    log("\n\nMELHOR SOLUCAO VIAVEL ENCONTRADA")
+    log("Melhor fitness viavel: " + repr(melhor_fitness_viavel))
+    log("Melhor custo viavel: " + repr(melhor_custo_viavel))
+    log("Pior deslocamento da solucao viavel: " + repr(melhor_desloc_viavel))
     log("Viabilidade final: VIAVEL")
+    log("Melhor individuo viavel:")
+    log(melhor_viavel_global)
 else:
-    log("Viabilidade final: INVIAVEL")
+    log("\n\nNENHUMA SOLUCAO VIAVEL FOI ENCONTRADA")
+    log("Melhor fitness geral: " + repr(melhor_fitness))
+    log("Melhor custo geral: " + repr(melhor_custo))
+    log("Pior deslocamento geral: " + repr(melhor_desloc))
+    log("Viabilidade: " + repr(melhor_viabilidade))
+    log("Melhor individuo encontrado:")
+    log(melhor_global)
 
-log("Melhor individuo:")
-log(melhor_global)
+horas = int(tempo_total // 3600)
+minutos = int((tempo_total % 3600) // 60)
+segundos = tempo_total % 60
 
-log("Tempo total de execucao: %.2f min" % (tempo_total / 60.0))
+log("Tempo total de execucao: %d h %d min %.2f s" % (horas, minutos, segundos))
